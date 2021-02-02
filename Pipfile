@@ -78,6 +78,7 @@ torchsummary = "*"
 blosc = "==1.9.2"
 segmentation-models-pytorch = "==0.1.2"
 pyopencl = "*"
+ft4222 = "*"
 
 [packages]
 atomicwrites = "*"
