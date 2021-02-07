@@ -1,11 +1,13 @@
 #define _USE_MATH_DEFINES
 
 #include <stdlib.h> // putenv
+#include <cmath> // std::abs
 #include <vector>
 #include <string>
 #include "json.hpp"
 
 #include <eigen3/Eigen/Dense>
+// TODO include common/transformations/orientation
 
 // TBD types
 // #define TYPE_DISABLED_LOGS vector<string>
@@ -24,7 +26,7 @@ class Localizer
     Localizer();
     Localizer(TYPE_DISABLED_LOGS disabled_logs,
               TYPE_DOG           dog);
-    
+
 public:
     // Functions
     void handle_sensors    (TYPE_TIME t, TYPE_SOCK sock);
@@ -35,9 +37,6 @@ public:
 
     TYPE_MSG liveLocationMsg();
 
-    // Attributes
-    // TODO: make sure float is sufficiently precise
-    TYPE_REAL last_gps_fix;
 private:
     // Functions
     void reset_kalman();
@@ -54,25 +53,25 @@ private:
                                    predicted_cov):
 
     // Attributes
-    LiveKalman           kf;                     
-    TYPE_REAL            max_age;                
+    LiveKalman           kf;
+    TYPE_REAL            max_age;
     TYPE_DISABLED_LOGS   disabled_logs;
-    Eigen::Vector3d      calib;                  
-    Eigen::Matrix3d      device_from_calib;      
-    Eigen::Matrix3d      calib_from_device;      
-    bool                 calibrated;             
-    TYPE_FUNCTION        H;                      
+    Eigen::Vector3d      calib;
+    Eigen::Matrix3d      device_from_calib;
+    Eigen::Matrix3d      calib_from_device;
+    bool                 calibrated;
+    TYPE_FUNCTION        H;
 
-    TYPE_INTEGER         posenet_invalid_count;  
-    TYPE_REAL            posenet_speed;          
-    TYPE_REAL            car_speed;              
+    TYPE_INTEGER         posenet_invalid_count;
+    TYPE_REAL            posenet_speed;
+    TYPE_REAL            car_speed;
     Eigen::Matrix<TYPE_REAL,POSENET_STD_HIST,1> posenet_stds;
 
     TYPE_CONVERTER       converter;               // coord.LocalCoord.from_ecef(self.kf.x[States.ECEF_POS])
 
-    TYPE_ULONG           unix_timestamp_millis;
-    TYPE_REAL            last_gps_fix;         
-    bool                 device_fell;          
+    TYPE_TIME            unix_timestamp_millis;
+    TYPE_TIME            last_gps_fix;
+    bool                 device_fell;
 
     // Kalman
     TYPE_OBSBUF  observation_buffer;
