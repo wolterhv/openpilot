@@ -48,7 +48,32 @@ Localizer::~Localizer()
 
 // TODO implement
 static TYPE_FIX
-Localizer::msg_from_state
+Localizer::msg_from_state()
+{
+    // NOTE this function could likely use some helper functions to become more
+    // readable
+    predicted_std = std::sqrt(predicted_cov.diag()); // TODO check function compatibility
+
+    ECEF fix_ecef        = predicted_state[States.ECEF_POS]; // TODO include type in decl./def.
+    ECEF fix_ecef_std    = predicted_std[States.ECEF_POS_ERR]; // TODO include type in decl./def.
+    ECEF vel_ecef_std    = predicted_std[States.ECEF_VELOCITY_ERR]; // TODO include type in decl./def.
+    ECEF vel_ecef        = predicted_state[States.ECEF_VELOCITY]; // TODO include type in decl./def.
+    Geodetic fix_pos_geo = ecef2geodetic(fix_ecef); // TODO implement, declare type
+    //fix_pos_geo_std = np.abs(coord.ecef2geodetic(fix_ecef + fix_ecef_std) - fix_pos_geo)
+
+    Eigen::Vector3d orientation_ecef            = quat2euler (predicted_state[State.ECEF_ORIENTATION]);
+    Eigen::Vector3d orientation_ecef_std        = rot2euler  (predicted_state[States.ECEF_ORIENTATION_ERR]); // TODO implement, declare type
+    Eigen::Matrix3d device_from_ecef            = quat2rot   (predicted_state[States.ECEF_ORIENTATION]).T();  // TODO implement, declare type
+    Eigen::Vector3d calibrated_orientation_ecef = rot2euler  (calib_from_device.dot(device_from_ecef)); // TODO implement, declare type
+
+    acc_calib         = calib_from_device.dot(predicted_state[States.ACCELERATION]); // TODO implement, type declare
+    acc_calib_std     = std::sqrt(diagonal(dot(calib_from_device,dot(predicted_cov[States.ACCELERATION_ERR, States.ACCELERATION_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
+    ang_vel_calib     = calib_from_device.dot(predicted_state[States.ANGULAR_VELOCITY]); // TODO implement, type declare
+    ang_vel_calib_std = std::sqrt(diagonal(dot(calib_from_device, dot(predicted_cov[States.ANGULAR_VELOCITY_ERR, States.ANGULAR_VELOCITY_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
+
+    LiveLocationKalman fix = messaging.log.LiveLocationKalman.new_message() // TODO implement
+    return fix;
+}
 
 
 TYPE_FIX
@@ -197,11 +222,58 @@ Localizer::handle_cam_odo(TYPE_TIME  current_time,
 
 // TODO implement
 void
-Localizer::handle_sensors
+Localizer::handle_sensors(TYPE_TIME  current_time,
+                          TYPE_LOG  *log)
+{
+    // TODO does not yet account for double sensor readings in the log
+    for    (TYPE_LOG::iterator sr; 
+            sr = log->iterator.begin();
+            sr != log->iterator.end() { // TODO verify iterator setup
+        // TODO handle messages from IMUs at the same time  
+        if (sr.source == SensorSource.lsm6ds3) {
+            continue;
+        // Gyro uncalibrated
+        } else if ((sr.source == 5) && (sr.type == 16)) {
+            gyro_counter += 1
+        // Accelerometer
+        } else if ((sr.source == 1) && (sr.type == 1)) {
+            // Check if device fell, estimate 10 for g
+            // 40 m/s² is a good filter for falling detection, no false
+            // positives in 20 kmin of driving
+            // ?? WHV: how does this make any sense physically? The acceleration
+            // ?? due to gravity of a falling object is around 10 m/s². How do
+            // ?? you go from that to 40 m/s²? 
+            // ?? Also, how does the folowing calculation consider the likely
+            // ?? change of orientation of the device as it falls? The vector
+            // ?? substracted from the acceleration is of fixed orientation and
+            // ?? magnitude. This part is very confusing and needs an
+            // ?? explaining comment.
+            Eigen::Vector3d acceldiff = sr.acceleration.v - Eigen::Vector3d(10, 0, 0);
+            device_fell = (device_fell || (acceldiff.norm() > 40));
 
-// TODO implement
+            acc_counter += 1;
+            if (acc_counter % SENSOR_DECIMATION == 0) {
+                Eigen::Vector3d v = sr.acceleration.v;
+                update_kalman(current_time,
+                              ObservationKind.PHONE_ACCEL, // TODO translate
+                              Eigen::Vector3d(-v[2], -v[1], -v[0])); // TODO verify accesor works
+            }
+
+        }
+    }
+}
+
 void
-Localizer::handle_live_calib
+Localizer::handle_live_calib(TYPE_TIME   current_time,
+                             TYPE_LOG   *log)
+{
+    if (log->rpyCalib.length() > 0) { // TODO translate
+        calib = log->rpyCalib;
+        device_from_calib = rot_from_euler(calib); // TODO implement
+        calib_from_device = device_from_calib.T; // TODO translate
+        calibrated = (log->calStatus == 1);
+    }
+}
 
 void
 Localizer::reset_kalman(TYPE_TIME           current_time,
