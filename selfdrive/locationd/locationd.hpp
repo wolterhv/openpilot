@@ -9,6 +9,7 @@
 #include <eigen3/Eigen/Dense>
 // TODO include common/transformations/orientation
 // TODO include common/transformations/coordinates
+// TODO include the capnp library
 
 // TBD types
 // #define TYPE_DISABLED_LOGS vector<string>

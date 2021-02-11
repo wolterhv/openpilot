@@ -6,6 +6,9 @@
 
 #define PI 3.1415 // TODO find a better and more centralized definition of pi
 
+// TODO The class methods may require an explicit "this" parent. I have to
+// learn C++.
+
 // Localizer class functions
 
 Localizer::Localizer(std::vector<std::string> disabled_logs = {},
@@ -47,7 +50,7 @@ Localizer::~Localizer()
 
 
 // TODO implement
-static TYPE_FIX
+static LiveLocationKalman
 Localizer::msg_from_state()
 {
     // NOTE this function could likely use some helper functions to become more
@@ -69,21 +72,109 @@ Localizer::msg_from_state()
     acc_calib         = calib_from_device.dot(predicted_state[States.ACCELERATION]); // TODO implement, type declare
     acc_calib_std     = std::sqrt(diagonal(dot(calib_from_device,dot(predicted_cov[States.ACCELERATION_ERR, States.ACCELERATION_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
     ang_vel_calib     = calib_from_device.dot(predicted_state[States.ANGULAR_VELOCITY]); // TODO implement, type declare
-    ang_vel_calib_std = std::sqrt(diagonal(dot(calib_from_device, dot(predicted_cov[States.ANGULAR_VELOCITY_ERR, States.ANGULAR_VELOCITY_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
+    // ang_vel_calib = 
+    //     sqrt(diag(dot(calib_from_device,
+    //                   dot(predicted_cov_ang_vel_std, 
+    //                       transpose(calib_from_device)))))
+    // TODO make this operation more digestible
+    ang_vel_calib_std = 
+        std::sqrt(
+            calib_from_device.dot(
+                predicted_cov[States.ANGULAR_VELOCITY_ERR, States.ANGULAR_VELOCITY_ERR].dot(
+                    calib_from_device.transpose())
+            ).diagonal()); // TODO untangle, implement and type declare
+    
+    vel_device = device_from_ecef.dot(vel_ecef.to_vector()); // TODO determine type, type declare
+    Eigen::Vector3d device_from_ecef_eul = quat2euler(predicted_state[States.ECEF_ORIENTATION]).transpose();
+    // idxs is way too pythonic. It creates a list out of the concatenation of
+    // two other lists. The first, the range of numbers from
+    // States.ECEF_ORIENTATION_ERR.start to States.ECEF_ORIENTATION_ERR.stop.
+    // The second, the range of numbers from States.ECEF_VELOCITY_ERR.start to
+    // ...stop
+    std::vector<TYPE_INT> idxs;
+    for    (TYPE_INT ii; 
+            ii = States.ECEF_ORIENTATION_ERR.start; 
+            ii < States.ECEF_VELOCITY_ERR.stop; 
+            ii++) {
+        if (ii == States.ECEF_ORIENTATION_ERR.stop)
+            ii = States.ECEF_VELOCITY_ERR;
+        idxs.push(ii);
+    }
 
-    LiveLocationKalman fix = messaging.log.LiveLocationKalman.new_message() // TODO implement
+    condensed_cov = predicted_cov[idxs][:, idxs]; // TODO translate
+    // apparently, predicted_cov is a tridimensional array and this operation
+    // above is meant to get, from the first dimension, only those elements
+    // whose indexes exist in the idxs array. From that element, get all
+    // children, but in each children, only those elements whose indexes exist
+    // in idxs. What a mess.
+
+    HH = H(*list(np.concatenate([device_from_ecef_eul, vel_ecef]))); // TODO translate this part
+
+    vel_device_cov = HH.dot(condensed_cov).dot(HH.transpose()); // TODO type declare, this is some kind of matrix, just need to find the dimensions
+    vel_device_std = std::sqrt(vel_device_cov.diagonal());
+
+    vel_calib = calib_from_device.dot(vel_device);
+    vel_calib_std = 
+        std::sqrt(
+            calib_from_device.dot(
+                vel_device_cov
+            ).dot(
+                calib_from_device.transpose()
+            ).diagonal()); // TODO type declare
+
+    NED orientation_ned = ned_euler_from_ecef(fix_ecef, orientation_ecef);
+    // orientation_ned_std = ned_euler_from_ecef(fix_ecef, orientation_ecef + orientation_ecef_std) - orientation_ned
+    NED ned_vel = 
+        converter.ecef2ned(fix_ecef + vel_ecef) 
+        - converter.ecef2ned(fix_ecef); // TODO implement
+    // ned_vel_std = self.converter.ecef2ned(fix_ecef + vel_ecef + vel_ecef_std) - self.converter.ecef2ned(fix_ecef + vel_ecef)
+
+    LiveLocationKalman fix = messaging.log.LiveLocationKalman.new_message(); // TODO implement
+
+    // This list apparently takes a long time to get built or is a bit time
+    // sensitive because there's a comment asking whether this could be sped
+    // up.
+    //          &Field,                         Value,                                    STD,                                        Valid
+    fill_field (&fix.positionGeodetic,          fix_pos_geo,                              np.nan*np.zeros(3),                         True),
+    fill_field (&fix.positionECEF,              fix_ecef,                                 fix_ecef_std,                               True),
+    fill_field (&fix.velocityECEF,              vel_ecef,                                 vel_ecef_std,                               True),
+    fill_field (&fix.velocityNED,               ned_vel,                                  np.nan*np.zeros(3),                         True),
+    fill_field (&fix.velocityDevice,            vel_device,                               vel_device_std,                             True),
+    fill_field (&fix.accelerationDevice,        predicted_state[States.ACCELERATION],     predicted_std[States.ACCELERATION_ERR],     True),
+    fill_field (&fix.orientationECEF,           orientation_ecef,                         orientation_ecef_std,                       True),
+    fill_field (&fix.calibratedOrientationECEF, calibrated_orientation_ecef,              np.nan*np.zeros(3),                         True),
+    fill_field (&fix.orientationNED,            orientation_ned,                          np.nan*np.zeros(3),                         True),
+    fill_field (&fix.angularVelocityDevice,     predicted_state[States.ANGULAR_VELOCITY], predicted_std[States.ANGULAR_VELOCITY_ERR], True),
+    fill_field (&fix.velocityCalibrated,        vel_calib,                                vel_calib_std,                              True),
+    fill_field (&fix.angularVelocityCalibrated, ang_vel_calib,                            ang_vel_calib_std,                          True),
+    fill_field (&fix.accelerationCalibrated,    acc_calib,                                acc_calib_std,                              True),
+    // TODO make sure that the "field" parameters are actually pointers
+
     return fix;
 }
 
+void 
+fill_field(LiveLocationKalman::Measurement *field, // may require Reader or
+                                                   // Builder subtype
+           capnp::List<double>              value, // ditto
+           capnp::List<double>              std,   // ditto
+           bool                             valid)
+{
+    field->value = to_float(value);
+    field->std   = to_float(std);
+    field->valid = valid;
+    return;
+}
 
-TYPE_FIX
+
+LiveLocationKalman
 Localizer::liveLocationMsg()
 {
-    TYPE_FIX fix = msg_from_state(converter,
-                                  calib_from_device,
-                                  H,  // TODO clue to get_H may lie here
-                                  kf.x,
-                                  kf.P); // TODO may be better to use a pointer instead
+    LiveLocationKalman fix = msg_from_state(converter,
+                             calib_from_device,
+                             H,  // TODO clue to get_H may lie here
+                             kf.x,
+                             kf.P); // TODO may be better to use a pointer instead
     TYPE_REAL old_mean = mean(posenet_stds[:POSENET_STD_HIST/2]); // TODO translate
     TYPE_REAL new_mean = mean(posenet_stds[POSENET_STD_HIST/2:]); // TODO translate
     bool std_spike = ((new_mean/old_mean > 4) && (new_mean > 7));
@@ -326,12 +417,22 @@ Localizer::reset_kalman(Eigen::Quaterniond init_orient,
 // LiveLocationKalman.positionGeodetic is a
 // LiveLocationKalman.Measurement
 // field.value is a LiveLocationKalman.Measurement.value
-// LiveLocationKalman.Measurement.value is a list of float64
-// Still not sure how to unpack this
-std::vector<float>
-to_float(float_list)
+// LiveLocationKalman.Measurement.value is a list of float64 ("List(float64)")
+// A capnp Float64 is a cpp double
+// A capnp List is a cpp capnp::List<T>
+// So, a List(Float64) is a capnp::List<double>
+// TODO analyse: what is the benefit of an std::vector<double> over the
+// capnp::List<double>? The .value list could be a simple float array, but the
+// .std list is asked for a "norm" method. This could be remediated simply if
+// it's a one-off
+// TODO consider using a plain array
+std::vector<double>
+to_float(capnp::List<double> floatable) // a Reader or Builder subtype may be
+                                        // needed for floatable
 {
-    std::vector<float> float_list;
+    std::vector<double> float_list = {floatable[0],
+                                      floatable[1],
+                                      floatable[2]};
     return float_list;
 }
 
