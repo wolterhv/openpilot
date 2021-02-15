@@ -1,13 +1,10 @@
 #include "locationd.hpp"
 
-#define DEG2RAD(x) ((x) * M_PI / 180.0
+#define DEG2RAD(x) ((x) * M_PI / 180.0)
 // TODO this should seriously be defined somewhere central. It's a macro used
 // by a lot of source files
 
 #define PI 3.1415 // TODO find a better and more centralized definition of pi
-
-// TODO The class methods may require an explicit "this" parent. I have to
-// learn C++.
 
 // Localizer class functions
 
@@ -55,13 +52,13 @@ Localizer::msg_from_state()
 {
     // NOTE this function could likely use some helper functions to become more
     // readable
-    predicted_std = std::sqrt(predicted_cov.diag()); // TODO check function compatibility
+    predicted_std = Eigen::ArrayBase::sqrt(predicted_cov.diag());
 
-    ECEF fix_ecef        = predicted_state[States.ECEF_POS]; // TODO include type in decl./def.
-    ECEF fix_ecef_std    = predicted_std[States.ECEF_POS_ERR]; // TODO include type in decl./def.
-    ECEF vel_ecef_std    = predicted_std[States.ECEF_VELOCITY_ERR]; // TODO include type in decl./def.
-    ECEF vel_ecef        = predicted_state[States.ECEF_VELOCITY]; // TODO include type in decl./def.
-    Geodetic fix_pos_geo = ecef2geodetic(fix_ecef); // TODO implement, declare type
+    ECEF     fix_ecef     = predicted_state[States.ECEF_POS]; // TODO include type in decl./def.
+    ECEF     fix_ecef_std = predicted_std[States.ECEF_POS_ERR]; // TODO include type in decl./def.
+    ECEF     vel_ecef_std = predicted_std[States.ECEF_VELOCITY_ERR]; // TODO include type in decl./def.
+    ECEF     vel_ecef     = predicted_state[States.ECEF_VELOCITY]; // TODO include type in decl./def.
+    Geodetic fix_pos_geo  = ecef2geodetic(fix_ecef); // TODO implement, declare type
     //fix_pos_geo_std = np.abs(coord.ecef2geodetic(fix_ecef + fix_ecef_std) - fix_pos_geo)
 
     Eigen::Vector3d orientation_ecef            = quat2euler (predicted_state[State.ECEF_ORIENTATION]);

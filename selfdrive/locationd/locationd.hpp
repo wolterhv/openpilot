@@ -10,6 +10,7 @@
 // TODO include common/transformations/orientation
 // TODO include common/transformations/coordinates
 // TODO include the capnp library
+#include "models/constants.hpp"
 
 // TBD types
 // #define TYPE_DISABLED_LOGS vector<string>
