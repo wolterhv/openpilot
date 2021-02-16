@@ -11,61 +11,110 @@
 // According to the syntax used in this script. The matrix which we want to
 // slice is one with lots of rows, and the indices in these slices are row
 // indices.
-class States():
-  ECEF_POS             = slice(0, 3)  // x, y and z in ECEF in meters
-  ECEF_ORIENTATION     = slice(3, 7)  // quat for pose of phone in ecef
-  ECEF_VELOCITY        = slice(7, 10)  // ecef velocity in m/s
-  ANGULAR_VELOCITY     = slice(10, 13)  // roll, pitch and yaw rates in device frame in radians/s
-  GYRO_BIAS            = slice(13, 16)  // roll, pitch and yaw biases
-  ODO_SCALE            = slice(16, 17)  // odometer scale
-  ACCELERATION         = slice(17, 20)  // Acceleration in device frame in m/s**2
-  IMU_OFFSET           = slice(20, 23)  // imu offset angles in radians
+// These slices can be simple C arrays and can be passed to a special function
+// to get an Eigen::Block from a Matrix or Eigen object
+const struct _States {
+    char ECEF_POS[]             = { 0,  3};  // x, y and z in ECEF in meters
+    char ECEF_ORIENTATION[]     = { 3,  7};  // quat for pose of phone in ecef
+    char ECEF_VELOCITY[]        = { 7, 10};  // ecef velocity in m/s
+    char ANGULAR_VELOCITY[]     = {10, 13};  // roll, pitch and yaw rates in device frame in rad/s
+    char GYRO_BIAS[]            = {13, 16};  // roll, pitch and yaw biases
+    char ODO_SCALE[]            = {16, 17};  // odometer scale
+    char ACCELERATION[]         = {17, 20};  // Acceleration in device frame in m/s**2
+    char IMU_OFFSET[]           = {20, 23};  // imu offset angles in radians
+    
+    // Error-state has different slices because it is an ESKF
+    char ECEF_POS_ERR[]         = { 0,  3};
+    char ECEF_ORIENTATION_ERR[] = { 3,  6};  // euler angles for orientation error
+    char ECEF_VELOCITY_ERR[]    = { 6,  9};
+    char ANGULAR_VELOCITY_ERR[] = { 9, 12};
+    char GYRO_BIAS_ERR[]        = {12, 15};
+    char ODO_SCALE_ERR[]        = {15, 16};
+    char ACCELERATION_ERR[]     = {16, 19};
+    char IMU_OFFSET_ERR[]       = {19, 22};
+} States;
+// TODO find a cleaner way to do this
 
-  // Error-state has different slices because it is an ESKF
-  ECEF_POS_ERR         = slice(0, 3)
-  ECEF_ORIENTATION_ERR = slice(3, 6)  // euler angles for orientation error
-  ECEF_VELOCITY_ERR    = slice(6, 9)
-  ANGULAR_VELOCITY_ERR = slice(9, 12)
-  GYRO_BIAS_ERR        = slice(12, 15)
-  ODO_SCALE_ERR        = slice(15, 16)
-  ACCELERATION_ERR     = slice(16, 19)
-  IMU_OFFSET_ERR       = slice(19, 22)
+// matrix.block(height, width, row0, col0)
+// rowblock : get all columns, give only row0 and height
+// get_matrix_block(Matrix m, block_t block)
+//     return m.block(block.height, block.width, 
+//                    block.row,    block.col)
+// get_matrix_rowset(Matrix m, rowset_t rowset)
+//     return m.block(rowset.height, m.width,
+//                    rowset.start,  0)
 
 
-class LiveKalman():
-  name = 'live'
+LiveKalman(const std::string generated_dir)
+{
+    name = "live";
 
-  initial_x = np.array([-2.7e6, 4.2e6, 3.8e6,
-                             1,     0,     0, 0,
-                             0,     0,     0,
-                             0,     0,     0,
-                             0,     0,     0,
-                             1,
-                             0,     0,     0,
-                             0,     0,     0] )
+    initial_x << -2.7e6, 4.2e6, 3.8e6,
+                      1,     0,     0, 0,
+                      0,     0,     0,
+                      0,     0,     0,
+                      0,     0,     0,
+                      1,
+                      0,     0,     0,
+                      0,     0,     0;
 
-  # state covariance
-  initial_P_diag = np.array([     1e16,      1e16,      1e16,
-                                   1e6,       1e6,       1e6,
-                                   1e4,       1e4,       1e4,
-                                  1**2,      1**2,      1**2,
-                               0.05**2,   0.05**2,   0.05**2,
-                               0.02**2,
-                                  1**2,      1**2,      1**2,
-                             (0.01)**2, (0.01)**2, (0.01)**2] )
+    // state covariance
+    initial_P_diag <<   1e8,  1e8,  1e8,
+                        1e3,  1e3,  1e3,
+                        1e2,  1e2,  1e2,
+                          1,    1,    1,
+                       0.05, 0.05, 0.05,
+                       0.02,
+                          1,    1,    1,
+                       0.01, 0.01, 0.01;
+    initial_P_diag = ArrayBase::pow(initial_P_diag, 2);
 
-  # process noise
-  Q = np.diag([0.03**2, 0.03**2, 0.03**2,
-               0.001**2, 0.001*2, 0.001**2,
-               0.01**2, 0.01**2, 0.01**2,
-               0.1**2, 0.1**2, 0.1**2,
-               (0.005 / 100)**2, (0.005 / 100)**2, (0.005 / 100)**2,
-               (0.02 / 100)**2,
-               3**2, 3**2, 3**2,
-               (0.05 / 60)**2, (0.05 / 60)**2, (0.05 / 60)**2])
+    // process noise
+    Q = 
+        Eigen::DiagonalMatrix(
+            ArrayBase::pow(
+                ((MatrixXd<22,1>) <<       0.03,        0.03,        0.03,
+                                          0.001,       0.001,       0.001,
+                                           0.01,        0.01,        0.01,
+                                            0.1,         0.1,         0.1,
+                                      0.005/100,   0.005/100,   0.005/100,
+                                       0.02/100,
+                                              3,           3,           3,
+                                        0.05/60,     0.05/60,     0.05/60), 
+                2));
+  
+    dim_state     = initial_x.rows();
+    dim_state_err = initial_P_diag.rows();
 
-  @staticmethod
-  def generate_code(generated_dir):
+    obs_noise[ObservationKind.ODOMETRIC_SPEED]            = np.atleast_2d(std::pow(0.2,2)); // TODO translate
+    // The np.at_least_2d(x) returns a 2d array like so: [[x]]
+    // I'm not sure that Eigen supports this
+    obs_noise[ObservationKind.PHONE_GYRO]                 = NOISEBUILDER(  0.025,   0.025,   0.025);
+    obs_noise[ObservationKind.PHONE_ACCEL]                = NOISEBUILDER(    0.5,     0.5,     0.5);
+    obs_noise[ObservationKind.CAMERA_ODO_ROTATION]        = NOISEBUILDER(   0.05,    0.05,    0.05);
+    obs_noise[ObservationKind.IMU_FRAME]                  = NOISEBUILDER(   0.05,    0.05,    0.05);
+    obs_noise[ObservationKind.NO_ROT]                     = NOISEBUILDER(0.00025, 0.00025, 0.00025);
+    obs_noise[ObservationKind.ECEF_POS]                   = NOISEBUILDER(      5,       5,       5);
+    obs_noise[ObservationKind.ECEF_VEL]                   = NOISEBUILDER(    0.5,     0.5,     0.5);
+    obs_noise[ObservationKind.ECEF_ORIENTATION_FROM_GPS]  = NOISEBUILDER(    0.2,     0.2,     0.2,   0.2)};
+
+    // init filter
+    filter = EKF_sym(generated_dir, 
+                     name, 
+                     Q, 
+                     initial_x, 
+                     Eigen::DiagonalMatrix(initial_P_diag),
+                     dim_state, 
+                     dim_state_err, 
+                     max_rewind_age=0.2); // TODO the parameter name probably
+                                          // needs to be removed
+}
+
+
+static void
+LiveKalman::generate_code(std::string generated_dir)
+{
+}
     name = LiveKalman.name
     dim_state = LiveKalman.initial_x.shape[0]
     dim_state_err = LiveKalman.initial_P_diag.shape[0]
@@ -188,42 +237,50 @@ class LiveKalman():
                [h_phone_rot_sym, ObservationKind.CAMERA_ODO_ROTATION, None],
                [h_imu_frame_sym, ObservationKind.IMU_FRAME, None]]
 
-    gen_code(generated_dir, name, f_sym, dt, state_sym, obs_eqs, dim_state, dim_state_err, eskf_params)
+    gen_code(generated_dir, 
+             name, 
+             f_sym, 
+             dt, 
+             state_sym, 
+             obs_eqs, 
+             dim_state, 
+             dim_state_err, 
+             eskf_params)
 
-LiveKalman(std::string generated_dir)
-{   
-    dim_state     = initial_x.shape[0];
-    dim_state_err = initial_P_diag.shape[0];
-
-    obs_noise = {ObservationKind.ODOMETRIC_SPEED:            np.atleast_2d(std::pow(0.2,2)),
-                 ObservationKind.PHONE_GYRO:                 NOISEBUILDER(0.025,   0.025,   0.025),
-                 ObservationKind.PHONE_ACCEL:                NOISEBUILDER(.5,      .5,      .5),
-                 ObservationKind.CAMERA_ODO_ROTATION:        NOISEBUILDER(0.05,    0.05,    0.05),
-                 ObservationKind.IMU_FRAME:                  NOISEBUILDER(0.05,    0.05,    0.05),
-                 ObservationKind.NO_ROT:                     NOISEBUILDER(0.00025, 0.00025, 0.00025),
-                 ObservationKind.ECEF_POS:                   NOISEBUILDER(5,       5,       5),
-                 ObservationKind.ECEF_VEL:                   NOISEBUILDER(.5,      .5,      .5),
-                 ObservationKind.ECEF_ORIENTATION_FROM_GPS:  NOISEBUILDER(.2,      .2,      .2,       .2)};
-
-    // init filter
-    filter = EKF_sym(generated_dir, self.name, self.Q, self.initial_x, np.diag(self.initial_P_diag), self.dim_state, self.dim_state_err, max_rewind_age=0.2)
+TYPEOF_filter__state
+LiveKalman::get_x()
+{
+    return filter.state();
 }
 
-  @property
-  def x(self):
-    return self.filter.state()
+TYPEOF_filter__filter_time
+LiveKalman::get_t()
+{
+    return filter.filter_time;
+}
 
-  @property
-  def t(self):
-    return self.filter.filter_time
+TYPEOF_filter__covs
+LiveKalman::get_P()
+{
+    return filter.covs();
+}
 
-  @property
-  def P(self):
-    return self.filter.covs()
 
-  def rts_smooth(self, estimates):
-    return self.filter.rts_smooth(estimates, norm_quats=True)
+TYPEOF_filter__rts_smooth
+LiveKalman::rts_smooth(TYPEOF_estimates estimates)
+{
+    return self.filter.rts_smooth(estimates, 
+                                  true); // norm_quats
+}
 
+
+TYPEOF_filter__predict_and_update_batch
+LiveKalman::init_state(state,
+                       covs_diag,   // TODO make optional
+                       covs,        // TODO make optional
+                       filter_time) // TODO make optional
+{
+    // TODO implement
   def init_state(self, state, covs_diag=None, covs=None, filter_time=None):
     if covs_diag is not None:
       P = np.diag(covs_diag)
@@ -232,6 +289,7 @@ LiveKalman(std::string generated_dir)
     else:
       P = self.filter.covs()
     self.filter.init_state(state, P, filter_time)
+}
 
   def predict_and_observe(self, t, kind, meas, R=None):
     if len(meas) > 0:

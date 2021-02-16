@@ -29,7 +29,7 @@ Localizer::Localizer(std::vector<std::string> disabled_logs = {},
     car_speed = 0.0;
     posenet_stds = 10*Eigen::Matrix<TYPE_REAL,POSENET_STD_HIST,1>::Ones();
 
-    converter = coord.LocalCoord.from_ecef(self.kf.x[States.ECEF_POS]); // python
+    converter = coord.LocalCoord.from_ecef(self.kf.x[States.ECEF_POS]); // TODO translate
 
     unix_timestamp_millis = 0.0;
     last_gps_fix          = 0.0;
