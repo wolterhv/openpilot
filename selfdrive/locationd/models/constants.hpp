@@ -2,7 +2,7 @@
 #define GENERATED_DIR "./generated"
 // How to do this in C++?
 
-enum ObservationKind {
+enum _ObservationKind {
   UNKNOWN                   =  0;
   NO_OBSERVATION            =  1;
   GPS_NED                   =  2;
@@ -37,7 +37,7 @@ enum ObservationKind {
   STIFFNESS                 = 28;  // [-]
   STEER_RATIO               = 29;  // [-]
   ROAD_FRAME_X_SPEED        = 30;  // (x) [m/s]
-};
+} ObservationKind;
 
 // There is a list of names for the previous constants, a function that is
 // supposed to associate the names to the constants and a subset of the

@@ -35,6 +35,9 @@ const struct _States {
 } States;
 // TODO find a cleaner way to do this
 
+// TODO find the type of "filter" and the types of those of its members which
+// are used in this module.
+
 // matrix.block(height, width, row0, col0)
 // rowblock : get all columns, give only row0 and height
 // get_matrix_block(Matrix m, block_t block)
@@ -82,6 +85,8 @@ LiveKalman(const std::string generated_dir)
                                               3,           3,           3,
                                         0.05/60,     0.05/60,     0.05/60), 
                 2));
+    // TODO find out where the awkward alignment of the initial_x,
+    // initial_P_diag and Q's diagonal come from
   
     dim_state     = initial_x.rows();
     dim_state_err = initial_P_diag.rows();
@@ -115,10 +120,11 @@ static void
 LiveKalman::generate_code(std::string generated_dir)
 {
 }
-    name = LiveKalman.name
-    dim_state = LiveKalman.initial_x.shape[0]
-    dim_state_err = LiveKalman.initial_P_diag.shape[0]
+    // name = LiveKalman.name;
+    uint dim_state     = initial_x.rows();
+    uint dim_state_err = initial_P_diag.rows();
 
+    // TODO here, start applying the symbolic math library
     state_sym = sp.MatrixSymbol('state', dim_state, 1)
     state = sp.Matrix(state_sym)
     x, y, z = state[States.ECEF_POS, :]
@@ -134,27 +140,27 @@ LiveKalman::generate_code(std::string generated_dir)
 
     dt = sp.Symbol('dt')
 
-    # calibration and attitude rotation matrices
+    // calibration and attitude rotation matrices
     quat_rot = quat_rotate(*q)
 
-    # Got the quat predict equations from here
-    # A New Quaternion-Based Kalman Filter for
-    # Real-Time Attitude Estimation Using the Two-Step
-    # Geometrically-Intuitive Correction Algorithm
+    // Got the quat predict equations from here
+    // A New Quaternion-Based Kalman Filter for
+    // Real-Time Attitude Estimation Using the Two-Step
+    // Geometrically-Intuitive Correction Algorithm
     A = 0.5 * sp.Matrix([[0, -vroll, -vpitch, -vyaw],
                          [vroll, 0, vyaw, -vpitch],
                          [vpitch, -vyaw, 0, vroll],
                          [vyaw, vpitch, -vroll, 0]])
     q_dot = A * q
 
-    # Time derivative of the state as a function of state
+    // Time derivative of the state as a function of state
     state_dot = sp.Matrix(np.zeros((dim_state, 1)))
     state_dot[States.ECEF_POS, :] = v
     state_dot[States.ECEF_ORIENTATION, :] = q_dot
     state_dot[States.ECEF_VELOCITY, 0] = quat_rot * acceleration
 
-    # Basic descretization, 1st order intergrator
-    # Can be pretty bad if dt is big
+    // Basic descretization, 1st order intergrator
+    // Can be pretty bad if dt is big
     f_sym = state + dt * state_dot
 
     state_err_sym = sp.MatrixSymbol('state_err', dim_state_err, 1)
@@ -164,7 +170,7 @@ LiveKalman::generate_code(std::string generated_dir)
     omega_err = state_err[States.ANGULAR_VELOCITY_ERR, :]
     acceleration_err = state_err[States.ACCELERATION_ERR, :]
 
-    # Time derivative of the state error as a function of state error and state
+    // Time derivative of the state error as a function of state error and state
     quat_err_matrix = euler_rotate(quat_err[0], quat_err[1], quat_err[2])
     q_err_dot = quat_err_matrix * quat_rot * (omega + omega_err)
     state_err_dot = sp.Matrix(np.zeros((dim_state_err, 1)))
@@ -173,16 +179,16 @@ LiveKalman::generate_code(std::string generated_dir)
     state_err_dot[States.ECEF_VELOCITY_ERR, :] = quat_err_matrix * quat_rot * (acceleration + acceleration_err)
     f_err_sym = state_err + dt * state_err_dot
 
-    # Observation matrix modifier
+    // Observation matrix modifier
     H_mod_sym = sp.Matrix(np.zeros((dim_state, dim_state_err)))
     H_mod_sym[States.ECEF_POS, States.ECEF_POS_ERR] = np.eye(States.ECEF_POS.stop - States.ECEF_POS.start)
     H_mod_sym[States.ECEF_ORIENTATION, States.ECEF_ORIENTATION_ERR] = 0.5 * quat_matrix_r(state[3:7])[:, 1:]
     H_mod_sym[States.ECEF_ORIENTATION.stop:, States.ECEF_ORIENTATION_ERR.stop:] = np.eye(dim_state - States.ECEF_ORIENTATION.stop)
 
-    # these error functions are defined so that say there
-    # is a nominal x and true x:
-    # true x = err_function(nominal x, delta x)
-    # delta x = inv_err_function(nominal x, true x)
+    // these error functions are defined so that say there
+    // is a nominal x and true x:
+    // true x = err_function(nominal x, delta x)
+    // delta x = inv_err_function(nominal x, true x)
     nom_x = sp.MatrixSymbol('nom_x', dim_state, 1)
     true_x = sp.MatrixSymbol('true_x', dim_state, 1)
     delta_x = sp.MatrixSymbol('delta_x', dim_state_err, 1)
@@ -203,10 +209,10 @@ LiveKalman::generate_code(std::string generated_dir)
     eskf_params = [[err_function_sym, nom_x, delta_x],
                    [inv_err_function_sym, nom_x, true_x],
                    H_mod_sym, f_err_sym, state_err_sym]
-    #
-    # Observation functions
-    #
-    #imu_rot = euler_rotate(*imu_angles)
+    // 
+    // Observation functions
+    // 
+    // imu_rot = euler_rotate(*imu_angles)
     h_gyro_sym = sp.Matrix([vroll + roll_bias,
                                       vpitch + pitch_bias,
                                       vyaw + yaw_bias])
@@ -245,7 +251,8 @@ LiveKalman::generate_code(std::string generated_dir)
              obs_eqs, 
              dim_state, 
              dim_state_err, 
-             eskf_params)
+             eskf_params); // this is a rednose function
+}
 
 TYPEOF_filter__state
 LiveKalman::get_x()
@@ -281,67 +288,101 @@ LiveKalman::init_state(state,
                        filter_time) // TODO make optional
 {
     // TODO implement
-  def init_state(self, state, covs_diag=None, covs=None, filter_time=None):
     if covs_diag is not None:
       P = np.diag(covs_diag)
     elif covs is not None:
       P = covs
     else:
       P = self.filter.covs()
-    self.filter.init_state(state, P, filter_time)
+    filter.init_state(state, P, filter_time)
 }
 
-  def predict_and_observe(self, t, kind, meas, R=None):
-    if len(meas) > 0:
-      meas = np.atleast_2d(meas)
-    if kind == ObservationKind.CAMERA_ODO_TRANSLATION:
-      r = self.predict_and_update_odo_trans(meas, t, kind)
-    elif kind == ObservationKind.CAMERA_ODO_ROTATION:
-      r = self.predict_and_update_odo_rot(meas, t, kind)
-    elif kind == ObservationKind.ODOMETRIC_SPEED:
-      r = self.predict_and_update_odo_speed(meas, t, kind)
-    else:
-      if R is None:
-        R = self.get_R(kind, len(meas))
-      elif len(R.shape) == 2:
-        R = R[None]
-      r = self.filter.predict_and_update_batch(t, kind, meas, R)
 
-    # Normalize quats
-    quat_norm = np.linalg.norm(self.filter.x[3:7, 0])
-    self.filter.x[States.ECEF_ORIENTATION, 0] = self.filter.x[States.ECEF_ORIENTATION, 0] / quat_norm
+TYPEOF_filter__predict_and_update_batch
+LiveKalman::predict_and_observe(UNKNOWN_TYPE t,
+                                enum _ObservationKind kind,
+                                UNKNOWN_TYPE meas, // Maybe a LiveLocationKalman::Measurement
+                                TYPE_TENSOR R) // TODO must default to None
+{
+    if (len(meas) > 0) // TODO translate
+      meas = np.atleast_2d(meas); // TODO translate
 
-    return r
+    TYPEOF_filter__predict_and_update_batch r;
+    switch(kind) {
+    case ObservationKind.CAMERA_ODO_TRANSLATION:
+        r = predict_and_update_odo_trans(meas, t, kind);
+        break;
+    case ObservationKind.CAMERA_ODO_ROTATION:
+        r = predict_and_update_odo_rot(meas, t, kind);
+        break;
+    case ObservationKind.ODOMETRIC_SPEED:
+        r = predict_and_update_odo_speed(meas, t, kind);
+        break;
+    default:
+        if (R is None) { // TODO translate
+          R = get_R(kind, len(meas)); // TODO implement
+        } else if (len(R.shape) == 2) { // TODO translate
+          R = R[None]; // TODO translate
+        }
+        r = filter.predict_and_update_batch(t, kind, meas, R);
+    }
 
-  def get_R(self, kind, n):
-    obs_noise = self.obs_noise[kind]
-    dim = obs_noise.shape[0]
-    R = np.zeros((n, dim, dim))
+    // Normalize quats
+    double quat_norm = np.linalg.norm(self.filter.x[3:7, 0]); // TODO implement / translate
+    // TODO Isn't there a more straightforward way of normalizing a matrix block?
+    filter.x[States.ECEF_ORIENTATION, 0] = self.filter.x[States.ECEF_ORIENTATION, 0] / quat_norm;
+
+    return r;
+}
+
+
+TYPE_TENSOR
+LiveKalman::get_R(char kind,
+                  UNKNOWN_TYPE n)
+{
+    Eigen::Matrix obs_noise_mat = obs_noise[kind];
+    uint dim = (uint) obs_noise.rows();
+    TYPE_TENSOR R = np.zeros((n, dim, dim)) // NOTE here we need a tensor, but Eigen support for tensors is in a development stage. What to use instead?
     for i in range(n):
-      R[i, :, :] = obs_noise
-    return R
+      R[i, :, :] = obs_noise;
+    return R;
+}
 
-  def predict_and_update_odo_speed(self, speed, t, kind):
-    z = np.array(speed)
-    R = np.zeros((len(speed), 1, 1))
-    for i, _ in enumerate(z):
-      R[i, :, :] = np.diag([0.2**2])
-    return self.filter.predict_and_update_batch(t, kind, z, R)
+TYPEOF_filter__predict_and_update_batch
+LiveKalman::predict_and_update_odo_speed(UNKNOWN_TYPE speed,
+                                         UNKNOWN_TYPE t,
+                                         enum _ObservationKind kind)
+{
+    Eigen::Vector z = np.array(speed); // TODO implement. Perhaps a dynamic size could be used
+    TYPE_TENSOR R = np.zeros((len(speed), 1, 1)); // TODO translate
+    for i, _ in enumerate(z): // TODO translate
+      R[i, :, :] = np.diag([0.2**2]) // TODO translate
+    return filter.predict_and_update_batch(t, kind, z, R); // TODO implement
+}
 
-  def predict_and_update_odo_trans(self, trans, t, kind):
-    z = trans[:, :3]
-    R = np.zeros((len(trans), 3, 3))
-    for i, _ in enumerate(z):
-        R[i, :, :] = np.diag(trans[i, 3:]**2)
-    return self.filter.predict_and_update_batch(t, kind, z, R)
+TYPEOF_filter__predict_and_update_batch
+LiveKalman::predict_and_update_odo_trans(UNKNOWN_TYPE trans,
+                                         UNKNOWN_TYPE t,
+                                         enum _ObservationKind kind)
+{
+    z = trans[:, :3]; // TODO translate
+    R = np.zeros((len(trans), 3, 3)); // TODO translate
+    for i, _ in enumerate(z): // TODO translate
+        R[i, :, :] = np.diag(trans[i, 3:]**2) // TODO translate
+    return filter.predict_and_update_batch(t, kind, z, R);
+}
 
-  def predict_and_update_odo_rot(self, rot, t, kind):
-    z = rot[:, :3]
-    R = np.zeros((len(rot), 3, 3))
-    for i, _ in enumerate(z):
-        R[i, :, :] = np.diag(rot[i, 3:]**2)
-    return self.filter.predict_and_update_batch(t, kind, z, R)
-
+TYPEOF_filter__predict_and_update_batch
+LiveKalman::predict_and_update_odo_rot(UNKNOWN_TYPE rot,
+                                       UNKNOWN_TYPE t,
+                                       enum _ObservationKind kind)
+{
+    z = rot[:, :3]; // TODO translate
+    R = np.zeros((len(rot), 3, 3)); // TODO translate
+    for i, _ in enumerate(z): // TODO translate 
+        R[i, :, :] = np.diag(rot[i, 3:]**2); // TODO translate
+    return self.filter.predict_and_update_batch(t, kind, z, R); // TODO translate
+}
 
 
 int
