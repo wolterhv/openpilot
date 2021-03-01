@@ -1,5 +1,12 @@
 #include "locationd.hpp"
 
+// TODO
+// General list
+// * Finish translating calls to modules which are already implemented in C++
+//
+// Find out whether the idea is to implement locationd.py to C++ or everything
+// inside locationd (more likely)
+
 #define DEG2RAD(x) ((x) * M_PI / 180.0)
 // TODO this should seriously be defined somewhere central. It's a macro used
 // by a lot of source files
@@ -15,7 +22,7 @@ Localizer::Localizer(std::vector<std::string> disabled_logs = {},
     last_gps_fix = 0.0;
 
     // Private attributes
-    kf                = LiveKalman(GENERATED_DIR);
+    kf                = LiveKalman(GENERATED_DIR); // TODO
     max_age           = 0.1; // seconds
     disabled_logs     = disabled_logs;
     calib             = Eigen::Vector3d::Zero();
@@ -69,18 +76,18 @@ Localizer::msg_from_state()
     acc_calib         = calib_from_device.dot(predicted_state[States.ACCELERATION]); // TODO implement, type declare
     acc_calib_std     = std::sqrt(diagonal(dot(calib_from_device,dot(predicted_cov[States.ACCELERATION_ERR, States.ACCELERATION_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
     ang_vel_calib     = calib_from_device.dot(predicted_state[States.ANGULAR_VELOCITY]); // TODO implement, type declare
-    // ang_vel_calib = 
+    // ang_vel_calib =
     //     sqrt(diag(dot(calib_from_device,
-    //                   dot(predicted_cov_ang_vel_std, 
+    //                   dot(predicted_cov_ang_vel_std,
     //                       transpose(calib_from_device)))))
     // TODO make this operation more digestible
-    ang_vel_calib_std = 
+    ang_vel_calib_std =
         std::sqrt(
             calib_from_device.dot(
                 predicted_cov[States.ANGULAR_VELOCITY_ERR, States.ANGULAR_VELOCITY_ERR].dot(
                     calib_from_device.transpose())
             ).diagonal()); // TODO untangle, implement and type declare
-    
+
     vel_device = device_from_ecef.dot(vel_ecef.to_vector()); // TODO determine type, type declare
     Eigen::Vector3d device_from_ecef_eul = quat2euler(predicted_state[States.ECEF_ORIENTATION]).transpose();
     // idxs is way too pythonic. It creates a list out of the concatenation of
@@ -89,9 +96,9 @@ Localizer::msg_from_state()
     // The second, the range of numbers from States.ECEF_VELOCITY_ERR.start to
     // ...stop
     std::vector<TYPE_INT> idxs;
-    for    (TYPE_INT ii; 
-            ii = States.ECEF_ORIENTATION_ERR.start; 
-            ii < States.ECEF_VELOCITY_ERR.stop; 
+    for    (TYPE_INT ii;
+            ii = States.ECEF_ORIENTATION_ERR.start;
+            ii < States.ECEF_VELOCITY_ERR.stop;
             ii++) {
         if (ii == States.ECEF_ORIENTATION_ERR.stop)
             ii = States.ECEF_VELOCITY_ERR;
@@ -111,7 +118,7 @@ Localizer::msg_from_state()
     vel_device_std = std::sqrt(vel_device_cov.diagonal());
 
     vel_calib = calib_from_device.dot(vel_device);
-    vel_calib_std = 
+    vel_calib_std =
         std::sqrt(
             calib_from_device.dot(
                 vel_device_cov
@@ -121,8 +128,8 @@ Localizer::msg_from_state()
 
     NED orientation_ned = ned_euler_from_ecef(fix_ecef, orientation_ecef);
     // orientation_ned_std = ned_euler_from_ecef(fix_ecef, orientation_ecef + orientation_ecef_std) - orientation_ned
-    NED ned_vel = 
-        converter.ecef2ned(fix_ecef + vel_ecef) 
+    NED ned_vel =
+        converter.ecef2ned(fix_ecef + vel_ecef)
         - converter.ecef2ned(fix_ecef); // TODO implement
     // ned_vel_std = self.converter.ecef2ned(fix_ecef + vel_ecef + vel_ecef_std) - self.converter.ecef2ned(fix_ecef + vel_ecef)
 
@@ -150,7 +157,7 @@ Localizer::msg_from_state()
     return fix;
 }
 
-void 
+void
 fill_field(LiveLocationKalman::Measurement *field, // may require Reader or
                                                    // Builder subtype
            capnp::List<double>              value, // ditto
@@ -206,7 +213,7 @@ Localizer::update_kalman(TYPE_TIME time,
     try {
         kf.predict_and_observe(time, kind, meas, R); // TODO translate
     } catch () {
-        cloudlog.error("Error in predict and observe, kalman reset"); // TODO translate
+        LOGE("Error in predict and observe, kalman reset");
         reset_kalman();
     }
     return;
@@ -248,13 +255,13 @@ Localizer::handle_gps(TYPE_TIME  current_time,
     Euler::Quaterniond initial_pose_ecef_quat = euler2quat(ecef_euler_from_ned(ecef_pos, orientation_ned_gps));
 
     if ((ecef_vel.norm() > 5) && (orientation_error.norm() > 1)) {
-      cloudlog.error("Locationd vs ubloxLocation orientation difference too large, kalman reset"); // TODO translate
+      LOGE("Locationd vs ubloxLocation orientation difference too large, kalman reset");
       reset_kalman(ecef_pos, initial_pose_ecef_quat);
       update_kalman(current_time,
                     ObservationKind.ECEF_ORIENTATION_FROM_GPS,
                     initial_pose_ecef_quat); // TODO translate kind
     } else if (gps_est_error > 50) {
-      cloudlog.error("Locationd vs ubloxLocation position difference too large, kalman reset") // TODO translate
+      LOGE("Locationd vs ubloxLocation position difference too large, kalman reset");
       reset_kalman(ecef_pos, initial_pose_ecef_quat)
     }
 
@@ -314,10 +321,10 @@ Localizer::handle_sensors(TYPE_TIME  current_time,
                           TYPE_LOG  *log)
 {
     // TODO does not yet account for double sensor readings in the log
-    for    (TYPE_LOG::iterator sr; 
+    for    (TYPE_LOG::iterator sr;
             sr = log->iterator.begin();
             sr != log->iterator.end() { // TODO verify iterator setup
-        // TODO handle messages from IMUs at the same time  
+        // TODO handle messages from IMUs at the same time
         if (sr.source == SensorSource.lsm6ds3) {
             continue;
         // Gyro uncalibrated
@@ -330,7 +337,7 @@ Localizer::handle_sensors(TYPE_TIME  current_time,
             // positives in 20 kmin of driving
             // ?? WHV: how does this make any sense physically? The acceleration
             // ?? due to gravity of a falling object is around 10 m/s². How do
-            // ?? you go from that to 40 m/s²? 
+            // ?? you go from that to 40 m/s²?
             // ?? Also, how does the folowing calculation consider the likely
             // ?? change of orientation of the device as it falls? The vector
             // ?? substracted from the acceleration is of fixed orientation and
@@ -445,56 +452,53 @@ get_H()
 
 // function: location
 void
-locationd_thread(TYPE_MESSAGING_MASTER    *sm             = NULL,
-                 TYPE_MESSAGING_MASTER    *pm             = NULL,
+locationd_thread(SubMaster                *sm             = NULL,
+                 PubMaster                *pm             = NULL,
                  std::vector<std::string>  disabled_logs  = {})
 {
     // Initialize sm and pm to none
     if (sm == NULL) {
-        std::vector<std::string> socks = {"gpsLocationExternal",
-                                          "sensorEvents",
-                                          "cameraOdometry",
-                                          "liveCalibration",
-                                          "carState"};
-        *sm = messaging.SubMaster(socks);
+        *sm = new SubMaster({"gpsLocationExternal",
+                             "sensorEvents",
+                             "cameraOdometry",
+                             "liveCalibration",
+                             "carState"});
     }
     if (pm == NULL) {
-        std::vector<std::string> socks = {"liveLocationKalman"}a;
-        *pm = messaging.PubMaster(socks);
+        *pm = new PubMaster({"liveLocationKalman"});
     }
 
     TYPE_PARAMS params = Params();
     Localizer localizer(disabled_logs);
 
+    std::string sock;
+    bool        updated;
+    double      t;
     while true {
         sm->update();
 
-        TYPE_SOCK sock;
-        bool updated;
-        for     (map<TYPE_SOCK, bool>::iterator ii;
-                 ii = sm->updated.begin();
-                 ii != sm->updated.end();
-                 ++ii) {
-            sock = ii->first;
-            updated = ii->second;
+        for (const auto &ii : services) {
+
+            sock = ii.name;
+            updated = SubMaster::updated(ii.name);
 
             if (updated && sm->valid[sock]) {
                 t = sm->logMonoTime[sock] * 1e-9;
                 switch(sock) {
                 case "sensorEvents":
-                    localizer.handle_sensors    (t, sm[sock]);
+                    localizer.handle_sensors    (t, *sm[sock]);
                     break;
                 case "gpsLocationExternal":
-                    localizer.handle_gps        (t, sm[sock]);
+                    localizer.handle_gps        (t, *sm[sock]);
                     break;
                 case "carState":
-                    localizer.handle_car_state  (t, sm[sock]);
+                    localizer.handle_car_state  (t, *sm[sock]);
                     break;
                 case "cameraOdometry":
-                    localizer.handle_cam_odo    (t, sm[sock]);
+                    localizer.handle_cam_odo    (t, *sm[sock]);
                     break;
                 case "liveCalibration":
-                    localizer.handle_live_calib (t, sm[sock]);
+                    localizer.handle_live_calib (t, *sm[sock]);
                     break;
                 }
             }

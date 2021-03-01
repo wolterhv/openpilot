@@ -22,7 +22,7 @@ const struct _States {
     char ODO_SCALE[]            = {16, 17};  // odometer scale
     char ACCELERATION[]         = {17, 20};  // Acceleration in device frame in m/s**2
     char IMU_OFFSET[]           = {20, 23};  // imu offset angles in radians
-    
+
     // Error-state has different slices because it is an ESKF
     char ECEF_POS_ERR[]         = { 0,  3};
     char ECEF_ORIENTATION_ERR[] = { 3,  6};  // euler angles for orientation error
@@ -33,7 +33,8 @@ const struct _States {
     char ACCELERATION_ERR[]     = {16, 19};
     char IMU_OFFSET_ERR[]       = {19, 22};
 } States;
-// TODO find a cleaner way to do this
+// TODO find a cleaner way to do this, i.e. a way which doesn't need defining
+// tons of constant char symbols
 
 // TODO find the type of "filter" and the types of those of its members which
 // are used in this module.
@@ -41,7 +42,7 @@ const struct _States {
 // matrix.block(height, width, row0, col0)
 // rowblock : get all columns, give only row0 and height
 // get_matrix_block(Matrix m, block_t block)
-//     return m.block(block.height, block.width, 
+//     return m.block(block.height, block.width,
 //                    block.row,    block.col)
 // get_matrix_rowset(Matrix m, rowset_t rowset)
 //     return m.block(rowset.height, m.width,
@@ -73,7 +74,7 @@ LiveKalman(const std::string generated_dir)
     initial_P_diag = ArrayBase::pow(initial_P_diag, 2);
 
     // process noise
-    Q = 
+    Q =
         Eigen::DiagonalMatrix(
             ArrayBase::pow(
                 ((MatrixXd<22,1>) <<       0.03,        0.03,        0.03,
@@ -83,11 +84,11 @@ LiveKalman(const std::string generated_dir)
                                       0.005/100,   0.005/100,   0.005/100,
                                        0.02/100,
                                               3,           3,           3,
-                                        0.05/60,     0.05/60,     0.05/60), 
+                                        0.05/60,     0.05/60,     0.05/60),
                 2));
     // TODO find out where the awkward alignment of the initial_x,
     // initial_P_diag and Q's diagonal come from
-  
+
     dim_state     = initial_x.rows();
     dim_state_err = initial_P_diag.rows();
 
@@ -104,27 +105,32 @@ LiveKalman(const std::string generated_dir)
     obs_noise[ObservationKind.ECEF_ORIENTATION_FROM_GPS]  = NOISEBUILDER(    0.2,     0.2,     0.2,   0.2)};
 
     // init filter
-    filter = EKF_sym(generated_dir, 
-                     name, 
-                     Q, 
-                     initial_x, 
+    filter = EKF_sym(generated_dir,
+                     name,
+                     Q,
+                     initial_x,
                      Eigen::DiagonalMatrix(initial_P_diag),
-                     dim_state, 
-                     dim_state_err, 
+                     dim_state,
+                     dim_state_err,
                      max_rewind_age=0.2); // TODO the parameter name probably
                                           // needs to be removed
 }
 
 
+// TODO this code generation main functionality may not be necessary, since the
+// code generation routine generates C code and this implementation is already
+// C++ code.
 static void
 LiveKalman::generate_code(std::string generated_dir)
 {
 }
-    // name = LiveKalman.name;
+    std::string name   = LiveKalman.name;
     uint dim_state     = initial_x.rows();
     uint dim_state_err = initial_P_diag.rows();
 
     // TODO here, start applying the symbolic math library
+    Matrix::Matrix state_sym (dim_state, 1); // symbol is 'state'
+    // cpp ^^ | python vv
     state_sym = sp.MatrixSymbol('state', dim_state, 1)
     state = sp.Matrix(state_sym)
     x, y, z = state[States.ECEF_POS, :]
@@ -209,9 +215,9 @@ LiveKalman::generate_code(std::string generated_dir)
     eskf_params = [[err_function_sym, nom_x, delta_x],
                    [inv_err_function_sym, nom_x, true_x],
                    H_mod_sym, f_err_sym, state_err_sym]
-    // 
+    //
     // Observation functions
-    // 
+    //
     // imu_rot = euler_rotate(*imu_angles)
     h_gyro_sym = sp.Matrix([vroll + roll_bias,
                                       vpitch + pitch_bias,
@@ -243,14 +249,14 @@ LiveKalman::generate_code(std::string generated_dir)
                [h_phone_rot_sym, ObservationKind.CAMERA_ODO_ROTATION, None],
                [h_imu_frame_sym, ObservationKind.IMU_FRAME, None]]
 
-    gen_code(generated_dir, 
-             name, 
-             f_sym, 
-             dt, 
-             state_sym, 
-             obs_eqs, 
-             dim_state, 
-             dim_state_err, 
+    gen_code(generated_dir,
+             name,
+             f_sym,
+             dt,
+             state_sym,
+             obs_eqs,
+             dim_state,
+             dim_state_err,
              eskf_params); // this is a rednose function
 }
 
@@ -276,7 +282,7 @@ LiveKalman::get_P()
 TYPEOF_filter__rts_smooth
 LiveKalman::rts_smooth(TYPEOF_estimates estimates)
 {
-    return self.filter.rts_smooth(estimates, 
+    return self.filter.rts_smooth(estimates,
                                   true); // norm_quats
 }
 
@@ -379,7 +385,7 @@ LiveKalman::predict_and_update_odo_rot(UNKNOWN_TYPE rot,
 {
     z = rot[:, :3]; // TODO translate
     R = np.zeros((len(rot), 3, 3)); // TODO translate
-    for i, _ in enumerate(z): // TODO translate 
+    for i, _ in enumerate(z): // TODO translate
         R[i, :, :] = np.diag(rot[i, 3:]**2); // TODO translate
     return self.filter.predict_and_update_batch(t, kind, z, R); // TODO translate
 }

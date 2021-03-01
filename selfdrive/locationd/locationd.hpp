@@ -11,6 +11,10 @@
 // TODO include common/transformations/coordinates
 // TODO include the capnp library
 #include "models/constants.hpp"
+#include "models/live_kf.hpp"
+#include "cereal/messaging.hpp" // cereal messaging
+#include "cereal/services.h" // service list
+#include "selfdrive/common/swaglog.h"
 
 // TBD types
 // #define TYPE_DISABLED_LOGS vector<string>
