@@ -3,6 +3,12 @@
 // TODO
 // General list
 // * Finish translating calls to modules which are already implemented in C++
+//   x swaglog/cloudlog
+//   o coordinates and orientation
+//     o solve whether to implement vector2ecef and vector2ned on LocalCoord
+//   x params
+//   o cereal messaging
+//   o cereal log
 //
 // Find out whether the idea is to implement locationd.py to C++ or everything
 // inside locationd (more likely)
@@ -10,8 +16,6 @@
 #define DEG2RAD(x) ((x) * M_PI / 180.0)
 // TODO this should seriously be defined somewhere central. It's a macro used
 // by a lot of source files
-
-#define PI 3.1415 // TODO find a better and more centralized definition of pi
 
 // Localizer class functions
 
@@ -36,7 +40,7 @@ Localizer::Localizer(std::vector<std::string> disabled_logs = {},
     car_speed = 0.0;
     posenet_stds = 10*Eigen::Matrix<TYPE_REAL,POSENET_STD_HIST,1>::Ones();
 
-    converter = coord.LocalCoord.from_ecef(self.kf.x[States.ECEF_POS]); // TODO translate
+    converter = LocalCoord(kf.x[States.ECEF_POS]); // TODO translate kf.x
 
     unix_timestamp_millis = 0.0;
     last_gps_fix          = 0.0;
@@ -129,8 +133,8 @@ Localizer::msg_from_state()
     NED orientation_ned = ned_euler_from_ecef(fix_ecef, orientation_ecef);
     // orientation_ned_std = ned_euler_from_ecef(fix_ecef, orientation_ecef + orientation_ecef_std) - orientation_ned
     NED ned_vel =
-        converter.ecef2ned(fix_ecef + vel_ecef)
-        - converter.ecef2ned(fix_ecef); // TODO implement
+          converter.ecef2ned(fix_ecef.to_vector() + vel_ecef.to_vector())
+        - converter.ecef2ned(fix_ecef); // TODO either use to_vector() or implement operator overloading in ECEF class
     // ned_vel_std = self.converter.ecef2ned(fix_ecef + vel_ecef + vel_ecef_std) - self.converter.ecef2ned(fix_ecef + vel_ecef)
 
     LiveLocationKalman fix = messaging.log.LiveLocationKalman.new_message(); // TODO implement
@@ -229,29 +233,38 @@ Localizer::handle_gps(TYPE_TIME  current_time,
 
     last_gps_fix = current_time;
 
-    converter = coord.LocalCoord.from_geodetic(log->latitude,
-                                               log->longitude,
-                                               log->altitude); // TODO implement
+    // TODO find out a cleaner way to do this
+    Geodetic *tmp_geo = new Geodetic;
+    *tmp_geo = { log->latitude,
+                 log->longitude,
+                 log->altitude };
+    converter = LocalCoord(*tmp_geo);
+    // TODO determine whether radians member is true or false, it seems that
+    // log may use degrees instead of radians
+    delete tmp_geo;
 
-    Euler::Vector3d ecef_pos = converter.ned2ecef([0, 0, 0]); // TODO implement
-    Euler::Vector3d ecef_vel = converter.ned2ecef(np.array(log->vNED)) - ecef_pos; // TODO translate
+    // TODO understand why ECEF would be used instead of Vector3d
+    // TODO figure out whether a "vector to ECEF" method is needed
+    ECEF ecef_pos = converter.ned2ecef({0, 0, 0});
+    Euler::Vector3d ecef_vel = converter.ned2ecef(log->vNED).to_vector() - ecef_pos.to_vector();
     Euler::Matrix3d ecef_pos_R = np.diag([(3*log->verticalAccuracy)**2]*3); // TODO translate
     Euler::Matrix3d ecef_vel_R = np.diag([(log->speedAccuracy)**2]*3); // TODO translate
 
     // self.time = GPSTime.from_datetime(datetime.utcfromtimestamp(log->timestamp*1e-3))
     unix_timestamp_millis = log->timestamp;
-    TYPE_REAL gps_est_error = np.sqrt((self.kf.x[0] - ecef_pos[0])**2 +
-                                      (self.kf.x[1] - ecef_pos[1])**2 +
-                                      (self.kf.x[2] - ecef_pos[2])**2); // TODO translate
+    float gps_est_error = std::sqrt(  std::pow(self.kf.x[0] - ecef_pos.x, 2)
+                                    + std::pow(self.kf.x[1] - ecef_pos.y, 2)
+                                    + std::pow(self.kf.x[2] - ecef_pos.z, 2));
 
     Eigen::Vector3d orientation_ecef = quat2euler(self.kf.x[States.ECEF_ORIENTATION]);
     // common/transformations/orientation.py: euler_from_quat = quat2euler
     Eigen::Vector3d orientation_ned = ned_euler_from_ecef(ecef_pos, orientation_ecef);
     Eigen::Vector3d orientation_ned_gps (0, 0, DEG2RAD(log->bearing));
-    TYPE_REAL orientation_error = std::fmod(orientation_ned - orientation_ned_gps - PI, 2*PI) - PI;
+    float orientation_error = std::fmod(orientation_ned - orientation_ned_gps - M_PI, 2*M_PI) - M_PI;
     // TODO the above may fail due to
     // - std::fmod being incapable of operating with Eigen objects
-    // - Eigen objects not supporting having non-eigen scalars subtracted
+    // - Eigen objects not supporting having non-eigen scalars subtracted from
+    //   them
     Euler::Quaterniond initial_pose_ecef_quat = euler2quat(ecef_euler_from_ned(ecef_pos, orientation_ned_gps));
 
     if ((ecef_vel.norm() > 5) && (orientation_error.norm() > 1)) {
@@ -462,28 +475,32 @@ locationd_thread(SubMaster                *sm             = NULL,
                              "sensorEvents",
                              "cameraOdometry",
                              "liveCalibration",
-                             "carState"});
+                             "carState"},
+                            nullptr,
+                            {"gpsLocationExternal"});
+        // This pointer allocation shall be deleted elsewhere
     }
     if (pm == NULL) {
         *pm = new PubMaster({"liveLocationKalman"});
+        // This pointer allocation shall be deleted elsewhere
     }
 
-    TYPE_PARAMS params = Params();
+    Params params ();
     Localizer localizer(disabled_logs);
 
     std::string sock;
     bool        updated;
-    double      t;
+    // double      t;
     while true {
         sm->update();
 
         for (const auto &ii : services) {
 
             sock = ii.name;
-            updated = SubMaster::updated(ii.name);
+            updated = sm->updated(ii.name);
 
             if (updated && sm->valid[sock]) {
-                t = sm->logMonoTime[sock] * 1e-9;
+                double t = sm->logMonoTime[sock] * 1e-9;
                 switch(sock) {
                 case "sensorEvents":
                     localizer.handle_sensors    (t, *sm[sock]);
@@ -505,9 +522,9 @@ locationd_thread(SubMaster                *sm             = NULL,
 
         }
 
-        if (sm->updated["cameraOdometry"]) {
-            TYPE_TIME t = sm->logMonoTime["cameraOdometry"];
-            msg = messaging::new_message("liveLocationKalman");
+        if (sm->updated("cameraOdometry")) {
+            uint64 t = sm->logMonoTime["cameraOdometry"];
+            msg = new_message("liveLocationKalman"); // TODO this method from cereal/messaging probably needs implementation
             msg.logMonoTime = t;
 
             msg.liveLocationKalman           = localizer.liveLocationMsg();
@@ -526,7 +543,7 @@ locationd_thread(SubMaster                *sm             = NULL,
                     {"longitude", msg.liveLocationKalman.positionGeodetic.value[1]},
                     {"altitude",  msg.liveLocationKalman.positionGeodetic.value[2]}
                 };
-                params.put("LastGPSPosition", location.dump());
+                params.write_db_value("LastGPSPosition", location.dump());
             }
         }
     }

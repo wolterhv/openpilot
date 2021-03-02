@@ -1,20 +1,21 @@
 #define _USE_MATH_DEFINES
 
 #include <stdlib.h> // putenv
-#include <cmath> // std::abs
+#include <math.h> // std::abs
 #include <vector>
 #include <string>
 #include "json.hpp"
 
 #include <eigen3/Eigen/Dense>
-// TODO include common/transformations/orientation
-// TODO include common/transformations/coordinates
+#include "common/transformations/orientation.hpp"
+#include "common/transformations/coordinates.hpp"
 // TODO include the capnp library
 #include "models/constants.hpp"
 #include "models/live_kf.hpp"
 #include "cereal/messaging.hpp" // cereal messaging
 #include "cereal/services.h" // service list
 #include "selfdrive/common/swaglog.h"
+#include "selfdrive/common/params.h"
 
 // TBD types
 // #define TYPE_DISABLED_LOGS vector<string>
@@ -74,7 +75,7 @@ private:
     TYPE_REAL            car_speed;
     Eigen::Matrix<TYPE_REAL,POSENET_STD_HIST,1> posenet_stds;
 
-    TYPE_CONVERTER       converter;               // coord.LocalCoord.from_ecef(self.kf.x[States.ECEF_POS])
+    LocalCoord           converter;
 
     TYPE_TIME            unix_timestamp_millis;
     TYPE_TIME            last_gps_fix;
