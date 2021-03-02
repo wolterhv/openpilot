@@ -72,10 +72,10 @@ Localizer::msg_from_state()
     Geodetic fix_pos_geo  = ecef2geodetic(fix_ecef); // TODO implement, declare type
     //fix_pos_geo_std = np.abs(coord.ecef2geodetic(fix_ecef + fix_ecef_std) - fix_pos_geo)
 
-    Eigen::Vector3d orientation_ecef            = quat2euler (predicted_state[State.ECEF_ORIENTATION]);
-    Eigen::Vector3d orientation_ecef_std        = rot2euler  (predicted_state[States.ECEF_ORIENTATION_ERR]); // TODO implement, declare type
-    Eigen::Matrix3d device_from_ecef            = quat2rot   (predicted_state[States.ECEF_ORIENTATION]).T();  // TODO implement, declare type
-    Eigen::Vector3d calibrated_orientation_ecef = rot2euler  (calib_from_device.dot(device_from_ecef)); // TODO implement, declare type
+    Eigen::Vector3d orientation_ecef            = quat2euler (predicted_state[State.ECEF_ORIENTATION]); // TODO timplement
+    Eigen::Vector3d orientation_ecef_std        = rot2euler  (predicted_state[States.ECEF_ORIENTATION_ERR]); // TODO implement
+    Eigen::Matrix3d device_from_ecef            = quat2rot   (predicted_state[States.ECEF_ORIENTATION]).T();  // TODO implement
+    Eigen::Vector3d calibrated_orientation_ecef = rot2euler  (calib_from_device.dot(device_from_ecef)); // TODO implement
 
     acc_calib         = calib_from_device.dot(predicted_state[States.ACCELERATION]); // TODO implement, type declare
     acc_calib_std     = std::sqrt(diagonal(dot(calib_from_device,dot(predicted_cov[States.ACCELERATION_ERR, States.ACCELERATION_ERR],transpose(calib_from_device))))); // TODO untangle, implement and type declare
@@ -225,8 +225,8 @@ Localizer::update_kalman(TYPE_TIME time,
 
 // TODO in prototype, TYPE_SOCK is used instead of TYPE_LOG, fix this
 void
-Localizer::handle_gps(TYPE_TIME  current_time,
-                      TYPE_LOG  *log)
+Localizer::handle_gps(double            current_time,
+                      GpsLocationData  *log)
 {
     if (log->flags % 2 == 0)
         return;
@@ -247,6 +247,7 @@ Localizer::handle_gps(TYPE_TIME  current_time,
     // TODO figure out whether a "vector to ECEF" method is needed
     ECEF ecef_pos = converter.ned2ecef({0, 0, 0});
     Euler::Vector3d ecef_vel = converter.ned2ecef(log->vNED).to_vector() - ecef_pos.to_vector();
+    // TODO vNED is a list of float32, see cereal/logcapnp
     Euler::Matrix3d ecef_pos_R = np.diag([(3*log->verticalAccuracy)**2]*3); // TODO translate
     Euler::Matrix3d ecef_vel_R = np.diag([(log->speedAccuracy)**2]*3); // TODO translate
 
@@ -543,6 +544,10 @@ locationd_thread(SubMaster                *sm             = NULL,
                     {"longitude", msg.liveLocationKalman.positionGeodetic.value[1]},
                     {"altitude",  msg.liveLocationKalman.positionGeodetic.value[2]}
                 };
+                // write_db_value can be used instead of put since
+                // a) strings will be converted to bytestrings automatically
+                // and
+                // b) we can be sure that the key is valid
                 params.write_db_value("LastGPSPosition", location.dump());
             }
         }

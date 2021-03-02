@@ -77,8 +77,8 @@ private:
 
     LocalCoord           converter;
 
-    TYPE_TIME            unix_timestamp_millis;
-    TYPE_TIME            last_gps_fix;
+    int64                unix_timestamp_millis;
+    double               last_gps_fix;
     bool                 device_fell;
 
     // Kalman
