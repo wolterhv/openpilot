@@ -1,3 +1,4 @@
+#include <math.h>
 #include <acado_code_generation.hpp>
 #include "common/modeldata.h"
 #include <math.h> // M_PI

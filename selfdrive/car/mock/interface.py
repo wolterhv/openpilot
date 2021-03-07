@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 from cereal import car
 from selfdrive.config import Conversions as CV
 from selfdrive.swaglog import cloudlog
