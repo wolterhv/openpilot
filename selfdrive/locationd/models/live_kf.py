@@ -14,24 +14,25 @@ EARTH_GM = 3.986005e14  # m^3/s^2 (gravitational constant * mass of earth)
 
 
 class States():
-  ECEF_POS = slice(0, 3)  # x, y and z in ECEF in meters
-  ECEF_ORIENTATION = slice(3, 7)  # quat for pose of phone in ecef
-  ECEF_VELOCITY = slice(7, 10)  # ecef velocity in m/s
-  ANGULAR_VELOCITY = slice(10, 13)  # roll, pitch and yaw rates in device frame in radians/s
-  GYRO_BIAS = slice(13, 16)  # roll, pitch and yaw biases
-  ODO_SCALE = slice(16, 17)  # odometer scale
-  ACCELERATION = slice(17, 20)  # Acceleration in device frame in m/s**2
-  IMU_OFFSET = slice(20, 23)  # imu offset angles in radians
+  ECEF_POS             = slice( 0,  3)  # x, y and z in ECEF in meters
+  ECEF_ORIENTATION     = slice( 3,  7)  # quat for pose of phone in ecef
+  ECEF_VELOCITY        = slice( 7, 10)  # ecef velocity in m/s
+  ANGULAR_VELOCITY     = slice(10, 13)  # roll, pitch and yaw rates in device
+                                        # frame in radians/s
+  GYRO_BIAS            = slice(13, 16)  # roll, pitch and yaw biases
+  ODO_SCALE            = slice(16, 17)  # odometer scale
+  ACCELERATION         = slice(17, 20)  # Acceleration in device frame in m/s**2
+  IMU_OFFSET           = slice(20, 23)  # imu offset angles in radians
 
   # Error-state has different slices because it is an ESKF
-  ECEF_POS_ERR = slice(0, 3)
-  ECEF_ORIENTATION_ERR = slice(3, 6)  # euler angles for orientation error
-  ECEF_VELOCITY_ERR = slice(6, 9)
-  ANGULAR_VELOCITY_ERR = slice(9, 12)
-  GYRO_BIAS_ERR = slice(12, 15)
-  ODO_SCALE_ERR = slice(15, 16)
-  ACCELERATION_ERR = slice(16, 19)
-  IMU_OFFSET_ERR = slice(19, 22)
+  ECEF_POS_ERR         = slice( 0,  3)
+  ECEF_ORIENTATION_ERR = slice( 3,  6)  # euler angles for orientation error
+  ECEF_VELOCITY_ERR    = slice( 6,  9)
+  ANGULAR_VELOCITY_ERR = slice( 9, 12)
+  GYRO_BIAS_ERR        = slice(12, 15)
+  ODO_SCALE_ERR        = slice(15, 16)
+  ACCELERATION_ERR     = slice(16, 19)
+  IMU_OFFSET_ERR       = slice(19, 22)
 
 
 class LiveKalman():
@@ -209,6 +210,9 @@ class LiveKalman():
     # init filter
     self.filter = EKF_sym(generated_dir, self.name, self.Q, self.initial_x, np.diag(self.initial_P_diag), self.dim_state, self.dim_state_err, max_rewind_age=0.2, logger=cloudlog)
 
+    # For issue 2386
+    self._use_cc_rewrite = False
+
   @property
   def x(self):
     return self.filter.state()
@@ -234,6 +238,12 @@ class LiveKalman():
     self.filter.init_state(state, P, filter_time)
 
   def predict_and_observe(self, t, kind, meas, R=None):
+    if self._use_cc_rewrite:
+      return _predict_and_observe_cc(t, kind, meas, R)
+    else:
+      return _predict_and_observe_py(t, kind, meas, R)
+
+  def _predict_and_observe_py(self, t, kind, meas, R=None):
     if len(meas) > 0:
       meas = np.atleast_2d(meas)
     if kind == ObservationKind.CAMERA_ODO_TRANSLATION:
@@ -255,7 +265,18 @@ class LiveKalman():
 
     return r
 
+  def _predict_and_observe_cc(self, t, kind, meas, R=None):
+    # TODO implement
+    raise NotImplemented
+    return r
+
   def get_R(self, kind, n):
+    if self._use_cc_rewrite:
+      return _get_R_cc(kind, n)
+    else:
+      return _get_R_py(kind, n)
+
+  def _get_R_py(self, kind, n):
     obs_noise = self.obs_noise[kind]
     dim = obs_noise.shape[0]
     R = np.zeros((n, dim, dim))
@@ -263,25 +284,63 @@ class LiveKalman():
       R[i, :, :] = obs_noise
     return R
 
+  def _get_R_cc(self, kind, n):
+    # TODO implement
+    raise NotImplemented
+    return R
+
   def predict_and_update_odo_speed(self, speed, t, kind):
+    if self._use_cc_rewrite:
+      return _predict_and_update_odo_speed_cc(speed, t, kind)
+    else:
+      return _predict_and_update_odo_speed_py(speed, t, kind)
+
+  def _predict_and_update_odo_speed_py(self, speed, t, kind):
     z = np.array(speed)
     R = np.zeros((len(speed), 1, 1))
     for i, _ in enumerate(z):
       R[i, :, :] = np.diag([0.2**2])
     return self.filter.predict_and_update_batch(t, kind, z, R)
 
+  def _predict_and_update_odo_speed_cc(self, speed, t, kind):
+    # TODO implement
+    raise NotImplemented
+    return self.filter.predict_and_update_batch(t, kind, z, R)
+
   def predict_and_update_odo_trans(self, trans, t, kind):
+    if self._use_cc_rewrite:
+      return _predict_and_update_odo_trans_cc(trans, t, kind)
+    else:
+      return _predict_and_update_odo_trans_py(trans, t, kind)
+
+  def _predict_and_update_odo_trans_py(self, trans, t, kind):
     z = trans[:, :3]
     R = np.zeros((len(trans), 3, 3))
     for i, _ in enumerate(z):
         R[i, :, :] = np.diag(trans[i, 3:]**2)
     return self.filter.predict_and_update_batch(t, kind, z, R)
 
+  def _predict_and_update_odo_trans_cc(self, trans, t, kind):
+    # TODO implement
+    raise NotImplemented
+    return self.filter.predict_and_update_batch(t, kind, z, R)
+
   def predict_and_update_odo_rot(self, rot, t, kind):
+    if self._use_cc_rewrite:
+      return _predict_and_update_odo_rot_cc(rot, t, kind)
+    else:
+      return _predict_and_update_odo_rot_py(rot, t, kind)
+
+  def _predict_and_update_odo_rot_py(self, rot, t, kind):
     z = rot[:, :3]
     R = np.zeros((len(rot), 3, 3))
     for i, _ in enumerate(z):
         R[i, :, :] = np.diag(rot[i, 3:]**2)
+    return self.filter.predict_and_update_batch(t, kind, z, R)
+
+  def _predict_and_update_odo_rot_cc(self, rot, t, kind):
+    # TODO implement
+    raise NotImplemented
     return self.filter.predict_and_update_batch(t, kind, z, R)
 
 
